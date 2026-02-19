@@ -1,0 +1,13 @@
+#pragma once
+
+#define FPS 120
+#define WINDOW_WIDTH 1200
+#define WINDOW_HEIGHT 600
+
+#define FONT_SIZE 32
+#define PAST_COLOR WHITE
+#define CURRENT_COLOR GRAY
+#define FUTURE_COLOR LIGHTGRAY
+#define MAX_LINE_SIZE 10
+
+#define BACKGROUD BLACK

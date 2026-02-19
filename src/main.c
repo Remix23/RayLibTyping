@@ -3,32 +3,32 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include "networking.h"
+#include <curl/curl.h>
+#include <time.h>
 
-#define FONT_SIZE 32
-#define PAST_COLOR LIGHTGRAY
-#define CURRENT_COLOR GRAY
-#define FUTURE_COLOR LIGHTGRAY
-#define MAX_LINE_SIZE 10
+#include "button.h"
+#include "setting.h"
+
+typedef unsigned int uint;
 
 typedef struct Diagnostics {
     int correct;
     int totalKeystrokes;
+    time_t elepsedTime;
 } Diagnostics;
 
 typedef struct Text {
     char** lines;
     int lineCount;
+    bool isDone;
+    time_t startTime;
 } Text;
-
-void DrawStatistics(Diagnostics* d)
-{
-    DrawText(TextFormat("Correct: %d", d->correct), 10, 30, FONT_SIZE, GREEN);
-    DrawText(TextFormat("Total Keystrokes: %d", d->totalKeystrokes), 10, 50, FONT_SIZE, BLUE);
-}
 
 Text* PrepareTextFromString (char* message) {
     Text* text = (Text*)malloc(sizeof(Text));
     text->lineCount = 0;
+    text->isDone = false;
     int current = 0;
     int lineSize = 8;
     int messageSize = strlen(message);
@@ -69,7 +69,7 @@ Text* PrepareTextFromString (char* message) {
 }
 void printText(Text* text) {
     for (int i = 0; i < text->lineCount; i++) {
-        printf("%s\n", text->lines[i]);
+        printf("Line [%d]: %s\n",i,  text->lines[i]);
     }
 }
 
@@ -81,71 +81,117 @@ void freeText(Text* text) {
     free(text);
 }
 
+Text* GetNewText() {
+    return NULL;
+}
+
+void DrawMenu (Diagnostics* d) {
+    int startY = GetScreenHeight() / 2 - 100;
+    DrawText(TextFormat("Correct: %d", d->correct), 10, startY, FONT_SIZE, GREEN);
+    DrawText(TextFormat("Accuracy: %.2f%%", (float)d->correct / d->totalKeystrokes * 100), 10, startY + FONT_SIZE, FONT_SIZE, BLUE);
+    DrawText(TextFormat("Total Keystrokes: %d", d->totalKeystrokes), 10, startY + 2 * FONT_SIZE, FONT_SIZE, BLUE);
+    DrawText("Done!", GetScreenWidth() / 2 - MeasureText("Done!", FONT_SIZE) / 2, GetScreenHeight() / 2 - FONT_SIZE / 2, FONT_SIZE, GREEN);
+} 
+
+
 int main(void)
 {
-    // Initialization
-    //--------------------------------------------------------------------------------------
-    const int screenWidth = 800;
-    const int screenHeight = 450;
 
-    char message[] = "123\n451\n23456a";
-    Text* text = PrepareTextFromString(message);
+    char* message;
+
+    char first_text[] = "123\n451\n23456a";
+    Text* text = PrepareTextFromString(first_text);
     printText(text);
 
-    freeText(text);
-    return 0;
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
 
-    InitWindow(screenWidth, screenHeight, "raylib [core] example - basic window");
+    InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT  , "Typing test");
 
     SetTargetFPS(120);               // Set our game to run at 60 frames-per-second
     //--------------------------------------------------------------------------------------
 
-    Vector2 mouse = { 0.0f, 0.0f };
+    // get longest line -> to reload on text change
+    int longestLine = 0;
+    for (int i = 0; i < text -> lineCount; i++) {
+        int lineSize = (int)MeasureText(text->lines[i], FONT_SIZE);
+        if (lineSize > longestLine) {
+            longestLine = lineSize;
+        }
+    }
 
     int current = 1;
-
+    int currentLine = 0;
+    time_t currentTime;
     // stats:
     Diagnostics d = {0, 0};
 
     // Main game loop
     while (!WindowShouldClose())    // Detect window close button or ESC key
     {
-        // Update
-        //----------------------------------------------------------------------------------
-        
-        // get the keys:
+        if (text->isDone) {
+            BeginDrawing();
+            ClearBackground(BACKGROUD);
+            DrawMenu(&d);
+            EndDrawing();
+            continue;
+        }
+        message = text->lines[currentLine];
+
+        time(&currentTime);
+
+        int msgSize = MeasureText(message, FONT_SIZE);
         int key;
         while ((key = GetCharPressed()) != 0) {
+            if (text->startTime == 0) {
+                time(&text->startTime);
+            }
             d.totalKeystrokes++;
             if (key == message[current]) {
                 d.correct++;
                 current++;
                 if (current >= (int)strlen(message)) {
                     current = 0;
+                    currentLine++;
+                    if (currentLine >= text->lineCount) {
+                        text->isDone = true;
+                        time(&d.elepsedTime);
+                        d.elepsedTime -= text->startTime;
+                        // freeText(text);
+                    }
                 }
             }
         };
-
-        mouse = GetMousePosition();
-        Vector2 sizeOfMessage = { (float)MeasureText(message, FONT_SIZE), FONT_SIZE };
 
         char* m1 = (char*)TextSubtext(message, 0, current);
         char* m2 = message + current + 1;
 
         float sizeOfFirstPart = (float)MeasureText(m1, FONT_SIZE);
         float sizeOfSecondPart = (float)MeasureText(m2, FONT_SIZE);
-        Vector2 posStart = { mouse.x - sizeOfMessage.x / 2, mouse.y - 10 };
-        Vector2 currentPos = {posStart.x + sizeOfFirstPart, posStart.y};
+        Vector2 posStart = { GetScreenWidth() / 2 - longestLine / 2, GetScreenHeight() / 2 - FONT_SIZE / 2 };
+        Vector2 currentPos = {posStart.x + sizeOfFirstPart + 2, posStart.y};
 
         BeginDrawing();
 
-        ClearBackground(RAYWHITE);
+        ClearBackground(BACKGROUD);
 
+        // compute the starting y: 
+
+        // past lines:
+        for (int i = 0; i < currentLine; i++) {
+            int lineHeight = FONT_SIZE * (currentLine - i);
+            DrawText(text->lines[i], posStart.x, posStart.y - lineHeight, FONT_SIZE - 2, PAST_COLOR);
+        }
+        // draw current line;
         DrawText(m1, posStart.x, posStart.y, FONT_SIZE, PAST_COLOR);
     
         DrawTextCodepoint(GetFontDefault(), message[current], currentPos, FONT_SIZE, CURRENT_COLOR);
         
-        DrawText(m2, posStart.x + sizeOfMessage.x - sizeOfSecondPart, currentPos.y, FONT_SIZE, FUTURE_COLOR);
+        DrawText(m2, posStart.x + msgSize - sizeOfSecondPart, currentPos.y, FONT_SIZE, FUTURE_COLOR);
+
+        for (int i = currentLine + 1; i < text->lineCount; i++) {
+            int lineHeight = FONT_SIZE * (i - currentLine);
+            DrawText(text->lines[i], posStart.x, posStart.y + lineHeight, FONT_SIZE - 2, FUTURE_COLOR);
+        }
 
         //----------------------------------------------------------------------------------
         DrawFPS(10, 10);
@@ -154,6 +200,7 @@ int main(void)
 
     // De-Initialization
 
+    freeText(text);
     CloseWindow();
 }
 
