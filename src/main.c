@@ -215,12 +215,19 @@ int main(void)
                         gameState.state = MENU;
                         time(&gameState.diagnostics->elepsedTime);
                         gameState.diagnostics->elepsedTime -= gameState.text->startTime;
-                        // freeText(gameState.text);
                     }
                 }
             }
         };
 
+        if (IsKeyPressed(KEY_BACKSPACE)) {
+            if (gameState.current > 0) {
+                gameState.current--;
+            } else if (gameState.currentLine > 0) {
+                gameState.currentLine--;
+                gameState.current = (int)strlen(gameState.text->lines[gameState.currentLine]) - 1;
+            }
+        }
         char* m1 = (char*)TextSubtext(message, 0, gameState.current);
         char* m2 = message + gameState.current + 1;
 
