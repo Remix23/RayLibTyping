@@ -9,26 +9,13 @@
 #include "button.h"
 #include "networking.h"
 #include "setting.h"
+#include "global_declarations.h"
 
-typedef unsigned int uint; 
-
-typedef struct Diagnostics {
-    int correct;
-    int totalKeystrokes;
-    time_t elepsedTime;
-} Diagnostics;
-
-typedef struct Text {
-    char** lines;
-    int lineCount;
-    bool isDone;
-    time_t startTime;
-} Text;
+static char buffer[MAX_CHAR_MSG] = "\0";
 
 Text* PrepareTextFromString (char* message) {
     Text* text = (Text*)malloc(sizeof(Text));
     text->lineCount = 0;
-    text->isDone = false;
     int current = 0;
     int lineSize = 8;
     int messageSize = strlen(message);
@@ -81,10 +68,6 @@ void freeText(Text* text) {
     free(text);
 }
 
-Text* GetNewText() {
-    return NULL;
-}
-
 void DrawMenu (Diagnostics* d) {
     int startY = GetScreenHeight() / 2 - 100;
     DrawText(TextFormat("Correct: %d", d->correct), 10, startY, FONT_SIZE, GREEN);
@@ -93,21 +76,51 @@ void DrawMenu (Diagnostics* d) {
     DrawText("Done!", GetScreenWidth() / 2 - MeasureText("Done!", FONT_SIZE) / 2, GetScreenHeight() / 2 - FONT_SIZE / 2, FONT_SIZE, GREEN);
 } 
 
-void restartGame (void *context) {
-    printf("Restarting game...\n");
+void resetTextInfo (GameState* gameState) {
+    gameState->currentLine = 0;
+    gameState->current = 0;
+    buffer[0] = '\0';
 }
 
-void newText (void *context) {
-    printf("Getting new text...\n");
+void resetDiagnostics (Diagnostics* diagnostics) {
+    diagnostics->correct = 0;
+    diagnostics->totalKeystrokes = 0;
+    diagnostics->elepsedTime = 0;
 }
 
-void checkButtons (Button** buttons, int buttonCount) {
+void restartGame (struct GameState *context) {
+    resetTextInfo(context);
+    resetDiagnostics(context->diagnostics);
+
+    context->state = TYPING;
+}
+
+void newText (struct GameState *context) {
+    freeText(context->text);
+    resetTextInfo(context);
+    
+    Get(context->curl, &buffer);
+    context->text = PrepareTextFromString(buffer);
+
+    context->longestLine = 0;
+    for (int i = 0; i < context->text->lineCount; i++) {
+        int lineSize = (int)MeasureText(context->text->lines[i], FONT_SIZE);
+        if (lineSize > context->longestLine) {
+            context->longestLine = lineSize;
+        }
+    }
+    
+    resetDiagnostics(context->diagnostics);
+    context->state = TYPING;
+}
+
+void checkButtons (Button** buttons, int buttonCount, GameState* t) {
     Vector2 mousePoint = GetMousePosition();
     for (int i = 0; i < buttonCount; i++) {
         Button* btn = buttons[i];
         if (CheckCollisionPointRec(mousePoint, (Rectangle){btn->position.x, btn->position.y, btn->size.x, btn->size.y})) {
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-                btn->callback(NULL);
+                btn->callback(t);
             }
         }
     }
@@ -115,7 +128,7 @@ void checkButtons (Button** buttons, int buttonCount) {
 
 void freeButtons(Button** buttons, int buttonCount) {
     for (int i = 0; i < buttonCount; i++) {
-        free(buttons[i]);
+        FreeButton(buttons[i]);
     }
 }
 
@@ -125,105 +138,95 @@ void DrawButtons(Button** buttons, int buttonCount) {
     }
 }
 
+void freeGameState (GameState* gameState) {
+    gameState->currentLine = 0;
+    gameState->current = 0;
+    freeText(gameState->text);
+    gameState->text = NULL;
+    gameState->diagnostics->correct = 0;
+    gameState->diagnostics->totalKeystrokes = 0;
+    gameState->diagnostics->elepsedTime = 0;
+    freeButtons(gameState->buttons, gameState->buttonCount);
+    FreeCurl(gameState->curl);
+}
+
 int main(void)
 {
-    char* message = NULL;
+    GameState gameState = {0};
+    gameState.currentLine = 0;
+    gameState.current = 0;
+    gameState.state = INIT;
+    gameState.diagnostics = (Diagnostics*)malloc(sizeof(Diagnostics));
+    memset(gameState.diagnostics, 0, sizeof(Diagnostics));
+    gameState.text = PrepareTextFromString("Loadding...");
 
-    char* buffer = (char*)malloc(MAX_CHAR_MSG * sizeof(char));
-    buffer[0] = '\0'; // Initialize buffer to an empty string
-
-    CURL* curl = initCurl("https://api.api-ninjas.com/v1/facts", "443");
-
-    Get(curl, buffer);
-
-    Text* t = PrepareTextFromString(buffer);
-
-    printText(t);
-
-    freeText(t);
-    free(buffer);
-    FreeCurl(curl);
-
-    return 0;
-
-    char first_text[] = "123\n451\n23456a";
-    Text* text = PrepareTextFromString(first_text);
-
+    gameState.curl = initCurl("https://api.api-ninjas.com/v1/facts", "443");
     // button init:
     Button* btn_restart = initButton((Vector2){WINDOW_WIDTH - 120, 10}, (Vector2){100, 30}, GRAY, "Restart", WHITE, &restartGame);
     Button* btn_again = initButton((Vector2){WINDOW_WIDTH - 120, 50}, (Vector2){100, 30}, GRAY, "New Text", WHITE, &newText);
 
-    Button* buttons[] = {btn_restart, btn_again};
+    gameState.buttons = (Button**)malloc(2 * sizeof(Button*));
+    gameState.buttons[0] = btn_restart;
+    gameState.buttons[1] = btn_again;
+    gameState.buttonCount = 2;
 
-    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+    char* message = NULL;
 
-    InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT  , "Typing test");
+    InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Typing test");
 
     SetTargetFPS(120);               // Set our game to run at 60 frames-per-second
     //--------------------------------------------------------------------------------------
 
+    // get longest line -> to reload on text chan
 
-    // get longest line -> to reload on text change
-    int longestLine = 0;
-    for (int i = 0; i < text -> lineCount; i++) {
-        int lineSize = (int)MeasureText(text->lines[i], FONT_SIZE);
-        if (lineSize > longestLine) {
-            longestLine = lineSize;
-        }
-    }
-
-    int current = 1;
-    int currentLine = 0;
-    time_t currentTime;
-    // stats:
-    Diagnostics d = {0, 0};
+    gameState.state = MENU;
 
     // Main game loop
     while (!WindowShouldClose())    // Detect window close button or ESC key
     {
-        if (text->isDone) {
+        if (gameState.state == MENU) {
             BeginDrawing();
             ClearBackground(BACKGROUD);
-            DrawMenu(&d);
+            DrawMenu(gameState.diagnostics);
 
-            DrawButtons(buttons, 2);
-            checkButtons(buttons, 2);
+            DrawButtons(gameState.buttons, gameState.buttonCount);
+            checkButtons(gameState.buttons, gameState.buttonCount, &gameState);
             EndDrawing();
             continue;
         }
-        message = text->lines[currentLine];
+        message = gameState.text->lines[gameState.currentLine];
 
-        time(&currentTime);
+        // time(gameState.diagnostics->elepsedTime);
 
         int msgSize = MeasureText(message, FONT_SIZE);
         int key;
         while ((key = GetCharPressed()) != 0) {
-            if (text->startTime == 0) {
-                time(&text->startTime);
+            if (gameState.text->startTime == 0) {
+                time(&gameState.text->startTime);
             }
-            d.totalKeystrokes++;
-            if (key == message[current]) {
-                d.correct++;
-                current++;
-                if (current >= (int)strlen(message)) {
-                    current = 0;
-                    currentLine++;
-                    if (currentLine >= text->lineCount) {
-                        text->isDone = true;
-                        time(&d.elepsedTime);
-                        d.elepsedTime -= text->startTime;
-                        // freeText(text);
+            gameState.diagnostics->totalKeystrokes++;
+            if (key == message[gameState.current]) {
+                gameState.diagnostics->correct++;
+                gameState.current++;
+                if (gameState.current >= (int)strlen(message)) {
+                    gameState.current = 0;
+                    gameState.currentLine++;
+                    if (gameState.currentLine >= gameState.text->lineCount) {
+                        gameState.state = MENU;
+                        time(&gameState.diagnostics->elepsedTime);
+                        gameState.diagnostics->elepsedTime -= gameState.text->startTime;
+                        // freeText(gameState.text);
                     }
                 }
             }
         };
 
-        char* m1 = (char*)TextSubtext(message, 0, current);
-        char* m2 = message + current + 1;
+        char* m1 = (char*)TextSubtext(message, 0, gameState.current);
+        char* m2 = message + gameState.current + 1;
 
         float sizeOfFirstPart = (float)MeasureText(m1, FONT_SIZE);
         float sizeOfSecondPart = (float)MeasureText(m2, FONT_SIZE);
-        Vector2 posStart = { GetScreenWidth() / 2 - longestLine / 2, GetScreenHeight() / 2 - FONT_SIZE / 2 };
+        Vector2 posStart = { GetScreenWidth() / 2 - gameState.longestLine / 2, GetScreenHeight() / 2 - FONT_SIZE / 2 };
         Vector2 currentPos = {posStart.x + sizeOfFirstPart + 2, posStart.y};
 
         BeginDrawing();
@@ -233,30 +236,27 @@ int main(void)
         // compute the starting y: 
 
         // past lines:
-        for (int i = 0; i < currentLine; i++) {
-            int lineHeight = FONT_SIZE * (currentLine - i);
-            DrawText(text->lines[i], posStart.x, posStart.y - lineHeight, FONT_SIZE - 2, PAST_COLOR);
+        for (int i = 0; i < gameState.currentLine; i++) {
+            int lineHeight = FONT_SIZE * (gameState.currentLine - i);
+            DrawText(gameState.text->lines[i], posStart.x, posStart.y - lineHeight, FONT_SIZE - 2, PAST_COLOR);
         }
         // draw current line;
         DrawText(m1, posStart.x, posStart.y, FONT_SIZE, PAST_COLOR);
     
-        DrawTextCodepoint(GetFontDefault(), message[current], currentPos, FONT_SIZE, CURRENT_COLOR);
+        DrawTextCodepoint(GetFontDefault(), message[gameState.current], currentPos, FONT_SIZE, CURRENT_COLOR);
         
         DrawText(m2, posStart.x + msgSize - sizeOfSecondPart, currentPos.y, FONT_SIZE, FUTURE_COLOR);
 
-        for (int i = currentLine + 1; i < text->lineCount; i++) {
-            int lineHeight = FONT_SIZE * (i - currentLine);
-            DrawText(text->lines[i], posStart.x, posStart.y + lineHeight, FONT_SIZE - 2, FUTURE_COLOR);
+        for (int i = gameState.currentLine + 1; i < gameState.text->lineCount; i++) {
+            int lineHeight = FONT_SIZE * (i - gameState.currentLine);
+            DrawText(gameState.text->lines[i], posStart.x, posStart.y + lineHeight, FONT_SIZE - 2, FUTURE_COLOR);
         }
 
         //----------------------------------------------------------------------------------
         DrawFPS(10, 10);
         EndDrawing();
     }
-    freeText(text);
-    freeButtons(buttons, 2);
-    CloseWindow();
-    FreeCurl(curl);
+    freeGameState(&gameState);
     return 0;
 }
 
