@@ -3,14 +3,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#include "networking.h"
-#include <curl/curl.h>
 #include <time.h>
+#include <curl/curl.h>
 
 #include "button.h"
+#include "networking.h"
 #include "setting.h"
 
-typedef unsigned int uint;
+typedef unsigned int uint; 
 
 typedef struct Diagnostics {
     int correct;
@@ -93,15 +93,67 @@ void DrawMenu (Diagnostics* d) {
     DrawText("Done!", GetScreenWidth() / 2 - MeasureText("Done!", FONT_SIZE) / 2, GetScreenHeight() / 2 - FONT_SIZE / 2, FONT_SIZE, GREEN);
 } 
 
+void restartGame (void *context) {
+    printf("Restarting game...\n");
+}
+
+void newText (void *context) {
+    printf("Getting new text...\n");
+}
+
+void checkButtons (Button** buttons, int buttonCount) {
+    Vector2 mousePoint = GetMousePosition();
+    for (int i = 0; i < buttonCount; i++) {
+        Button* btn = buttons[i];
+        if (CheckCollisionPointRec(mousePoint, (Rectangle){btn->position.x, btn->position.y, btn->size.x, btn->size.y})) {
+            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                btn->callback(NULL);
+            }
+        }
+    }
+}
+
+void freeButtons(Button** buttons, int buttonCount) {
+    for (int i = 0; i < buttonCount; i++) {
+        free(buttons[i]);
+    }
+}
+
+void DrawButtons(Button** buttons, int buttonCount) {
+    for (int i = 0; i < buttonCount; i++) {
+        DrawButton(buttons[i]);
+    }
+}
 
 int main(void)
 {
+    char* message = NULL;
 
-    char* message;
+    char* buffer = (char*)malloc(MAX_CHAR_MSG * sizeof(char));
+    buffer[0] = '\0'; // Initialize buffer to an empty string
+
+    CURL* curl = initCurl("https://api.api-ninjas.com/v1/facts", "443");
+
+    Get(curl, buffer);
+
+    Text* t = PrepareTextFromString(buffer);
+
+    printText(t);
+
+    freeText(t);
+    free(buffer);
+    FreeCurl(curl);
+
+    return 0;
 
     char first_text[] = "123\n451\n23456a";
     Text* text = PrepareTextFromString(first_text);
-    printText(text);
+
+    // button init:
+    Button* btn_restart = initButton((Vector2){WINDOW_WIDTH - 120, 10}, (Vector2){100, 30}, GRAY, "Restart", WHITE, &restartGame);
+    Button* btn_again = initButton((Vector2){WINDOW_WIDTH - 120, 50}, (Vector2){100, 30}, GRAY, "New Text", WHITE, &newText);
+
+    Button* buttons[] = {btn_restart, btn_again};
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
 
@@ -109,6 +161,7 @@ int main(void)
 
     SetTargetFPS(120);               // Set our game to run at 60 frames-per-second
     //--------------------------------------------------------------------------------------
+
 
     // get longest line -> to reload on text change
     int longestLine = 0;
@@ -132,6 +185,9 @@ int main(void)
             BeginDrawing();
             ClearBackground(BACKGROUD);
             DrawMenu(&d);
+
+            DrawButtons(buttons, 2);
+            checkButtons(buttons, 2);
             EndDrawing();
             continue;
         }
@@ -197,11 +253,11 @@ int main(void)
         DrawFPS(10, 10);
         EndDrawing();
     }
-
-    // De-Initialization
-
     freeText(text);
+    freeButtons(buttons, 2);
     CloseWindow();
+    FreeCurl(curl);
+    return 0;
 }
 
 

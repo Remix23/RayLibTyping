@@ -1,85 +1,56 @@
 #include <stdlib.h>
 #include <stdio.h>
-#include <sys/socket.h>
-#include <sys/types.h>
 #include <string.h>
-#include <unistd.h>
-#include <netinet/in.h>
-#include <netdb.h>
 #include <curl/curl.h>
 #include <stdbool.h>
 
 #include "networking.h"
+#include "setting.h"
 
-int InitSocket () {
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd == -1) {
-        perror("socket creation failed");
-        exit(EXIT_FAILURE);
+static size_t totalSize = 0;
+
+void* initCurl (const char* url, const char* port) 
+{
+    CURL *curl = curl_easy_init();
+
+    if (!curl) {
+        fprintf(stderr, "Failed to initialize curl\n");
+        return NULL;
     }
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    return curl;
+} 
 
-    return sockfd;
+size_t processJSON (char* contents, size_t size, size_t ntimes, void* userp) {
+    totalSize += size * ntimes;
+    char* buffer = (char*)userp;
+
+    // remove the json parts:
+    char* start = strstr(contents, ":");
+    char* end = strrchr(contents, '"');
+
+    if (start != NULL && totalSize < MAX_CHAR_MSG) {
+        strncat(buffer, start + 3, (int)(end - start - 3));
+    }
+    return totalSize;
 }
 
-void bindHost (int sockfd, const char* hostname, const char* port) {
-    struct addrinfo adresses, *results, *p;
-    memset(&adresses, 0, sizeof(adresses));
-    adresses.ai_family = AF_INET;
-    adresses.ai_socktype = SOCK_STREAM;
-    adresses.ai_protocol = IPPROTO_TCP;
-
-    int status = getaddrinfo(hostname, port, &adresses, &results);
-    if (status != 0) {
-        printf("getaddrinfo failed: %s\n", gai_strerror(status));
-        exit(EXIT_FAILURE);
+int Get (CURL* curl, char* buffer) {
+    struct curl_slist *chunk = NULL;
+    chunk = curl_slist_append(chunk, "X-Api-Key: AV22my54gIgWdr8CcByIFc75O4ibodJx9oxignXq");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, processJSON);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, buffer);
+    CURLcode res = curl_easy_perform(curl);
+    if (res != CURLE_OK) {
+        fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+        return -1;
     }
-
-    bool connected = false;
-
-    for (p = results; p != NULL; p = p->ai_next) {
-        if(connect(sockfd, p -> ai_addr, p -> ai_addrlen) == 0) {
-            connected = true;
-            break;
-        };
-    }
-    
-    if (!connected) {
-        perror("socket connection failed");
-        freeaddrinfo(results);
-        close(sockfd);
-        exit(EXIT_FAILURE);
-    }
-    freeaddrinfo(results);
+    totalSize = 0;
+    curl_slist_free_all(chunk);
+    return 0;
 }
 
-int makeGetRequest (int sockfd,const char* hostname, char* response, size_t response_size) {
-
-    char message[1024];
-    snprintf(message, sizeof(message),
-        "GET /v1/facts HTTP/1.0\r\n"
-        "X-Api-Key: AV22my54gIgWdr8CcByIFc75O4ibodJx9oxignXq\r\n"
-        "\r\n");
-
-    ssize_t sent = send(sockfd, message, strlen(message), 0);
-    if (sent == -1) {
-        perror("send failed");
-        close(sockfd);
-        exit(EXIT_FAILURE);
-    }
-    printf("Sent %zd bytes\n", sent);
-    ssize_t received;
-
-
-    while ((received = recv(sockfd, response, response_size - 1, 0)) > 0) {
-        response[received] = '\0'; // Null-terminate the received data
-        printf("Received %zd bytes\n", received);
-    }
-
-    if (received == -1) {
-        perror("recv failed");
-        close(sockfd);
-        exit(EXIT_FAILURE);
-    }
-    close(sockfd);
-    return strlen(response);
+void FreeCurl (CURL* curl) {
+    curl_easy_cleanup(curl);
 }

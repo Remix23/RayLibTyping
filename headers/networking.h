@@ -13,7 +13,11 @@
 
 #define API_KEY "AV22my54gIgWdr8CcByIFc75O4ibodJx9oxignXq"
 
-int InitSocket ();
+// int InitSocket ();
 
-void bindHost(int sockfd, const char* hostname, const char* port);
-int makeGetRequest (int sockfd, const char* hostname, char* response, size_t response_size);
+// void bindHost(int sockfd, const char* hostname, const char* port);
+// int makeGetRequest (int sockfd, const char* hostname, char* response, size_t response_size);
+
+void* initCurl (const char* url, const char* port);
+int Get (CURL* curl, char* headers);
+void FreeCurl (CURL* curl);
