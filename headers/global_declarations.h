@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <time.h>
 #include <curl/curl.h>
 
@@ -13,6 +14,8 @@ typedef struct {
 
 typedef struct Text {
     char** lines;
+    bool** incorrect;
+    int* lineSizes;
     int lineCount;
     time_t startTime;
 } Text;

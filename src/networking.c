@@ -30,7 +30,7 @@ size_t processJSON (char* contents, size_t size, size_t ntimes, void* userp) {
     char* end = strrchr(contents, '"');
 
     if (start != NULL && totalSize < MAX_CHAR_MSG) {
-        strncat(buffer, start + 3, (int)(end - start - 3));
+        strncat(buffer, start + 3, end - start - 3);
     }
     return totalSize;
 }

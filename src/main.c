@@ -11,52 +11,70 @@
 #include "setting.h"
 #include "global_declarations.h"
 
-static char buffer[MAX_CHAR_MSG] = "\0";
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+
+// TODO: add mistakes highligher and some
+// TODO: add real time diagnostics (accuracy, wpm, etc)
 
 Text* PrepareTextFromString (char* message) {
     Text* text = (Text*)malloc(sizeof(Text));
     text->lineCount = 0;
     int current = 0;
-    int lineSize = 8;
+    int numOfLines = 8;
+
     int messageSize = strlen(message);
     char* line = strtok(message, "\n");
-    text->lines = (char**)malloc(lineSize * sizeof(char*));
+
+    if (line == message) line = strtok(NULL, "\n");
+
+    text->lines = (char**)malloc(numOfLines * sizeof(char*));
+
+    text->lineSizes = (int*)malloc(numOfLines * sizeof(int));
 
     while (current < messageSize) {
         if (message[current] == '\0') break;
 
         // expand the dynmiac array
-        if (text->lineCount >= lineSize - 1) {
-            lineSize += 8;
-            text->lines = (char**)realloc(text->lines, lineSize * sizeof(char*));
+        if (text->lineCount >= numOfLines - 1) {
+            numOfLines += 3;
+            text->lines = (char**)realloc(text->lines, numOfLines * sizeof(char*));
+            text->lineSizes = (int*)realloc(text->lineSizes, numOfLines * sizeof(int));
         }
-
         // two cases: if there is a new line, or line == NULL
-        if (line != NULL) {
-            int size = strlen(line);
-            if (size < MAX_LINE_SIZE) {
-                // copy the line to the text struct
-                text->lines[text->lineCount] = (char*)malloc((size + 1) * sizeof(char));
-                strncpy(text->lines[text->lineCount], message + current, size);
-                text->lines[text->lineCount][size] = '\0';
-                text->lineCount++;
-                line = strtok(NULL, "\n");
-                current += size + 1;
-                continue;
-            } 
+        size_t size = 0;
+
+        char* start = message + current;
+
+        if (line == NULL) {
+            size = MIN(MAX_LINE_SIZE, strlen(start));
+            char* lastWhitespace = strchr(start + size, ' ');
+            if (lastWhitespace != NULL) {
+                size += lastWhitespace - (start + size);
+                current += 1;
+            } else {
+                size = strlen(start); // last word
+            }
+        } else {
+            size = MIN(strlen(line), MAX_LINE_SIZE);
         }
+        
         // copy the line to the text struct
-        text->lines[text->lineCount] = (char*)malloc((MAX_LINE_SIZE + 1) * sizeof(char));
-        strncpy(text->lines[text->lineCount], message + current, MAX_LINE_SIZE);
-        text->lines[text->lineCount][MAX_LINE_SIZE] = '\0';
+        text->lines[text->lineCount] = (char*)malloc((size + 1) * sizeof(char));
+        strncpy(text->lines[text->lineCount], start, size);
+        text->lines[text->lineCount][size] = '\0';
+        text->lineSizes[text->lineCount] = size;
         text->lineCount++;
-        current += MAX_LINE_SIZE;
+        if (line != NULL) {
+            line = strtok(NULL, "\n");
+            current += 1; // +1 for the new line character
+        }
+        current += size;
     }
     return text;
 }
 void printText(Text* text) {
     for (int i = 0; i < text->lineCount; i++) {
-        printf("Line [%d]: %s\n",i,  text->lines[i]);
+        printf("Line [%d] - size [%d]: %s\n", i, text->lineSizes[i], text->lines[i]);
     }
 }
 
@@ -64,7 +82,11 @@ void freeText(Text* text) {
     for (int i = 0; i < text->lineCount; i++) {
         free(text->lines[i]);
     }
+    // for (int i = 0; i < text->lineCount; i++) {
+    //     free(text->incorrect[i]);
+    // }
     free(text->lines);
+    free(text->lineSizes);
     free(text);
 }
 
@@ -79,7 +101,6 @@ void DrawMenu (Diagnostics* d) {
 void resetTextInfo (GameState* gameState) {
     gameState->currentLine = 0;
     gameState->current = 0;
-    buffer[0] = '\0';
 }
 
 void resetDiagnostics (Diagnostics* diagnostics) {
@@ -98,9 +119,13 @@ void restartGame (struct GameState *context) {
 void newText (struct GameState *context) {
     freeText(context->text);
     resetTextInfo(context);
+
+    char buffer[MAX_CHAR_MSG] = ""; // local buffer for the new text
     
     Get(context->curl, &buffer);
-    context->text = PrepareTextFromString(buffer);
+    context->text = PrepareTextFromString(&buffer);
+
+    printf("buffer: %s\n", buffer);
 
     context->longestLine = 0;
     for (int i = 0; i < context->text->lineCount; i++) {
@@ -158,7 +183,7 @@ int main(void)
     gameState.state = INIT;
     gameState.diagnostics = (Diagnostics*)malloc(sizeof(Diagnostics));
     memset(gameState.diagnostics, 0, sizeof(Diagnostics));
-    gameState.text = PrepareTextFromString("Loadding...");
+    gameState.text = PrepareTextFromString("Loading...");
 
     gameState.curl = initCurl("https://api.api-ninjas.com/v1/facts", "443");
     // button init:
@@ -176,9 +201,6 @@ int main(void)
 
     SetTargetFPS(120);               // Set our game to run at 60 frames-per-second
     //--------------------------------------------------------------------------------------
-
-    // get longest line -> to reload on text chan
-
     gameState.state = MENU;
 
     // Main game loop
@@ -239,9 +261,6 @@ int main(void)
         BeginDrawing();
 
         ClearBackground(BACKGROUD);
-
-        // compute the starting y: 
-
         // past lines:
         for (int i = 0; i < gameState.currentLine; i++) {
             int lineHeight = FONT_SIZE * (gameState.currentLine - i);
@@ -258,6 +277,9 @@ int main(void)
             int lineHeight = FONT_SIZE * (i - gameState.currentLine);
             DrawText(gameState.text->lines[i], posStart.x, posStart.y + lineHeight, FONT_SIZE - 2, FUTURE_COLOR);
         }
+
+        // draw underscore for the current char:
+        DrawLine(currentPos.x - 2, currentPos.y + FONT_SIZE, currentPos.x + MeasureText("_", FONT_SIZE) + 2, currentPos.y + FONT_SIZE, CURRENT_COLOR);
 
         //----------------------------------------------------------------------------------
         DrawFPS(10, 10);
