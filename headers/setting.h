@@ -11,4 +11,6 @@
 #define MAX_LINE_SIZE 50
 #define MAX_CHAR_MSG 300
 
+#define MISTAKE_COLOR RED
+
 #define BACKGROUD BLACK

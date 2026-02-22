@@ -13,8 +13,9 @@
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
-// TODO: add mistakes highligher and some
 // TODO: add real time diagnostics (accuracy, wpm, etc)
+// TODO: shows whats the correct letter 
+// TODO: add zodiak api call
 
 Text* PrepareTextFromString (char* message) {
     Text* text = (Text*)malloc(sizeof(Text));
@@ -30,6 +31,7 @@ Text* PrepareTextFromString (char* message) {
     text->lines = (char**)malloc(numOfLines * sizeof(char*));
 
     text->lineSizes = (int*)malloc(numOfLines * sizeof(int));
+    text->coloring = (Colors**)malloc(numOfLines * sizeof(Colors*));
 
     while (current < messageSize) {
         if (message[current] == '\0') break;
@@ -39,6 +41,7 @@ Text* PrepareTextFromString (char* message) {
             numOfLines += 3;
             text->lines = (char**)realloc(text->lines, numOfLines * sizeof(char*));
             text->lineSizes = (int*)realloc(text->lineSizes, numOfLines * sizeof(int));
+            text->coloring = (Colors**)realloc(text->coloring, numOfLines * sizeof(Colors*));
         }
         // two cases: if there is a new line, or line == NULL
         size_t size = 0;
@@ -63,18 +66,29 @@ Text* PrepareTextFromString (char* message) {
         strncpy(text->lines[text->lineCount], start, size);
         text->lines[text->lineCount][size] = '\0';
         text->lineSizes[text->lineCount] = size;
-        text->lineCount++;
         if (line != NULL) {
             line = strtok(NULL, "\n");
             current += 1; // +1 for the new line character
         }
         current += size;
+
+        // initialize the incorrect array for this line
+        text->coloring[text->lineCount] = (Colors*)malloc(size * sizeof(Colors));
+        memset(text->coloring[text->lineCount], PAST, size * sizeof(Colors));
+        
+        text->lineCount++;
     }
     return text;
 }
 void printText(Text* text) {
     for (int i = 0; i < text->lineCount; i++) {
         printf("Line [%d] - size [%d]: %s\n", i, text->lineSizes[i], text->lines[i]);
+        printf("Incorrect chars: ");
+        for (int j = 0; j < text->lineSizes[i]; j++) {
+            printf("%d ", text->coloring[i][j]);
+        }
+            
+        printf("\n");
     }
 }
 
@@ -82,9 +96,10 @@ void freeText(Text* text) {
     for (int i = 0; i < text->lineCount; i++) {
         free(text->lines[i]);
     }
-    // for (int i = 0; i < text->lineCount; i++) {
-    //     free(text->incorrect[i]);
-    // }
+    for (int i = 0; i < text->lineCount; i++) {
+        free(text->coloring[i]);
+    }
+    free(text->coloring);
     free(text->lines);
     free(text->lineSizes);
     free(text);
@@ -101,6 +116,9 @@ void DrawMenu (Diagnostics* d) {
 void resetTextInfo (GameState* gameState) {
     gameState->currentLine = 0;
     gameState->current = 0;
+    for (int i = 0; i < gameState->text->lineCount; i++) {
+        memset(gameState->text->coloring[i], FUTURE, gameState->text->lineSizes[i] * sizeof(Colors));
+    }
 }
 
 void resetDiagnostics (Diagnostics* diagnostics) {
@@ -118,10 +136,11 @@ void restartGame (struct GameState *context) {
 
 void newText (struct GameState *context) {
     freeText(context->text);
-    resetTextInfo(context);
+    context->currentLine = 0;
+    context->current = 0;
 
     char buffer[MAX_CHAR_MSG] = ""; // local buffer for the new text
-    
+    printf("buffer: %s\n", buffer);
     Get(context->curl, &buffer);
     context->text = PrepareTextFromString(&buffer);
 
@@ -167,12 +186,30 @@ void freeGameState (GameState* gameState) {
     gameState->currentLine = 0;
     gameState->current = 0;
     freeText(gameState->text);
-    gameState->text = NULL;
-    gameState->diagnostics->correct = 0;
-    gameState->diagnostics->totalKeystrokes = 0;
-    gameState->diagnostics->elepsedTime = 0;
+    free(gameState->diagnostics);
     freeButtons(gameState->buttons, gameState->buttonCount);
     FreeCurl(gameState->curl);
+}
+
+float DrawStyledText (char* text, Colors* colors, Vector2 beginPos, int fontSize, float spacing) {
+    float offsetX = 0;
+    float currentOffsetX = 0;
+    Font f = GetFontDefault();
+    float scallingFactor = (float)fontSize / f.baseSize;
+    for (int i = 0; text[i] != '\0'; i++) {
+        Color color = GET_COLOR(colors[i]);
+
+        if (colors[i] == CURRENT) currentOffsetX = offsetX;
+
+        DrawTextCodepoint(GetFontDefault(), text[i], (Vector2){beginPos.x + offsetX, beginPos.y}, fontSize, color);
+        int codepoint = GetGlyphIndex(f, text[i]);
+        if (f.glyphs[codepoint].offsetX == 0) {
+            offsetX += f.recs[codepoint].width * scallingFactor + spacing;
+        } else {
+            offsetX += f.glyphs[codepoint].advanceX * scallingFactor + spacing;
+        }
+    }
+    return currentOffsetX;
 }
 
 int main(void)
@@ -199,13 +236,14 @@ int main(void)
 
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Typing test");
 
-    SetTargetFPS(120);               // Set our game to run at 60 frames-per-second
+    SetTargetFPS(FPS);               // Set our game to run at 60 frames-per-second
     //--------------------------------------------------------------------------------------
     gameState.state = MENU;
 
     // Main game loop
     while (!WindowShouldClose())    // Detect window close button or ESC key
     {
+loop_begin:
         if (gameState.state == MENU) {
             BeginDrawing();
             ClearBackground(BACKGROUD);
@@ -217,46 +255,49 @@ int main(void)
             continue;
         }
         message = gameState.text->lines[gameState.currentLine];
+        Colors* coloring = gameState.text->coloring[gameState.currentLine];
 
         // time(gameState.diagnostics->elepsedTime);
-
-        int msgSize = MeasureText(message, FONT_SIZE);
         int key;
         while ((key = GetCharPressed()) != 0) {
             if (gameState.text->startTime == 0) {
                 time(&gameState.text->startTime);
             }
             gameState.diagnostics->totalKeystrokes++;
+            // move the cursor always forward
+            gameState.text->coloring[gameState.currentLine][gameState.current] = MISTAKE;
             if (key == message[gameState.current]) {
                 gameState.diagnostics->correct++;
-                gameState.current++;
-                if (gameState.current >= (int)strlen(message)) {
-                    gameState.current = 0;
-                    gameState.currentLine++;
-                    if (gameState.currentLine >= gameState.text->lineCount) {
-                        gameState.state = MENU;
-                        time(&gameState.diagnostics->elepsedTime);
-                        gameState.diagnostics->elepsedTime -= gameState.text->startTime;
-                    }
-                }
+                
+                gameState.text->coloring[gameState.currentLine][gameState.current] = PAST;
             }
-        };
+            gameState.current++;
+            if (gameState.current >= (int)strlen(message)) {
+                gameState.current = 0;
+                gameState.currentLine++;
+            }
+            if (gameState.currentLine >= gameState.text->lineCount) {
+                gameState.state = MENU;
+                time(&gameState.diagnostics->elepsedTime);
+                gameState.diagnostics->elepsedTime -= gameState.text->startTime;
+                goto loop_begin;
+            } else {
+                gameState.text->coloring[gameState.currentLine][gameState.current] = CURRENT;
+            }
+        }
 
         if (IsKeyPressed(KEY_BACKSPACE)) {
+            gameState.text->coloring[gameState.currentLine][gameState.current] = FUTURE;
             if (gameState.current > 0) {
                 gameState.current--;
             } else if (gameState.currentLine > 0) {
                 gameState.currentLine--;
                 gameState.current = (int)strlen(gameState.text->lines[gameState.currentLine]) - 1;
             }
+            gameState.text->coloring[gameState.currentLine][gameState.current] = CURRENT;
         }
-        char* m1 = (char*)TextSubtext(message, 0, gameState.current);
-        char* m2 = message + gameState.current + 1;
-
-        float sizeOfFirstPart = (float)MeasureText(m1, FONT_SIZE);
-        float sizeOfSecondPart = (float)MeasureText(m2, FONT_SIZE);
         Vector2 posStart = { GetScreenWidth() / 2 - gameState.longestLine / 2, GetScreenHeight() / 2 - FONT_SIZE / 2 };
-        Vector2 currentPos = {posStart.x + sizeOfFirstPart + 2, posStart.y};
+
 
         BeginDrawing();
 
@@ -266,12 +307,8 @@ int main(void)
             int lineHeight = FONT_SIZE * (gameState.currentLine - i);
             DrawText(gameState.text->lines[i], posStart.x, posStart.y - lineHeight, FONT_SIZE - 2, PAST_COLOR);
         }
-        // draw current line;
-        DrawText(m1, posStart.x, posStart.y, FONT_SIZE, PAST_COLOR);
-    
-        DrawTextCodepoint(GetFontDefault(), message[gameState.current], currentPos, FONT_SIZE, CURRENT_COLOR);
-        
-        DrawText(m2, posStart.x + msgSize - sizeOfSecondPart, currentPos.y, FONT_SIZE, FUTURE_COLOR);
+
+        float currentOffsetX = DrawStyledText(message, coloring, posStart, FONT_SIZE, 2.0);
 
         for (int i = gameState.currentLine + 1; i < gameState.text->lineCount; i++) {
             int lineHeight = FONT_SIZE * (i - gameState.currentLine);
@@ -279,7 +316,7 @@ int main(void)
         }
 
         // draw underscore for the current char:
-        DrawLine(currentPos.x - 2, currentPos.y + FONT_SIZE, currentPos.x + MeasureText("_", FONT_SIZE) + 2, currentPos.y + FONT_SIZE, CURRENT_COLOR);
+        DrawLine(posStart.x + currentOffsetX - 2, posStart.y + FONT_SIZE, posStart.x + currentOffsetX + MeasureText("_", FONT_SIZE) + 2, posStart.y + FONT_SIZE, CURRENT_COLOR);
 
         //----------------------------------------------------------------------------------
         DrawFPS(10, 10);

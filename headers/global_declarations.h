@@ -6,6 +6,18 @@
 
 typedef unsigned int uint; 
 
+typedef enum Colors {
+    CURRENT, // 0
+    PAST, // 1
+    MISTAKE, // 
+    FUTURE,
+} Colors;
+
+#define GET_COLOR(color) \
+    (color == CURRENT ? CURRENT_COLOR : \
+     color == PAST ? PAST_COLOR : \
+     color == MISTAKE ? MISTAKE_COLOR : FUTURE_COLOR)
+
 typedef struct {
     int correct;
     int totalKeystrokes;
@@ -14,7 +26,7 @@ typedef struct {
 
 typedef struct Text {
     char** lines;
-    bool** incorrect;
+    Colors** coloring;
     int* lineSizes;
     int lineCount;
     time_t startTime;
