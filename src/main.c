@@ -13,13 +13,13 @@
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
-// TODO: add real time diagnostics (accuracy, wpm, etc)
 // TODO: shows whats the correct letter 
 // TODO: add zodiak api call
 
 Text* PrepareTextFromString (char* message) {
     Text* text = (Text*)malloc(sizeof(Text));
     text->lineCount = 0;
+    text->startTime = 0;
     int current = 0;
     int numOfLines = 8;
 
@@ -140,11 +140,8 @@ void newText (struct GameState *context) {
     context->current = 0;
 
     char buffer[MAX_CHAR_MSG] = ""; // local buffer for the new text
-    printf("buffer: %s\n", buffer);
-    Get(context->curl, &buffer);
-    context->text = PrepareTextFromString(&buffer);
-
-    printf("buffer: %s\n", buffer);
+    Get(context->curl, (char*) &buffer);
+    context->text = PrepareTextFromString((char*) &buffer);
 
     context->longestLine = 0;
     for (int i = 0; i < context->text->lineCount; i++) {
@@ -212,6 +209,12 @@ float DrawStyledText (char* text, Colors* colors, Vector2 beginPos, int fontSize
     return currentOffsetX;
 }
 
+void DrawWPM (Diagnostics *d) {
+    double minutes = d->elepsedTime / 60.0;
+    int wpm = (int)(d->correct / 5.0 / minutes);
+    DrawText(TextFormat("WPM: %d", wpm), 10, 10 + FONT_SIZE, FONT_SIZE, ORANGE);
+}
+
 int main(void)
 {
     GameState gameState = {0};
@@ -222,7 +225,7 @@ int main(void)
     memset(gameState.diagnostics, 0, sizeof(Diagnostics));
     gameState.text = PrepareTextFromString("Loading...");
 
-    gameState.curl = initCurl("https://api.api-ninjas.com/v1/facts", "443");
+    gameState.curl = initCurl("https://api.api-ninjas.com/v1/facts");
     // button init:
     Button* btn_restart = initButton((Vector2){WINDOW_WIDTH - 120, 10}, (Vector2){100, 30}, GRAY, "Restart", WHITE, &restartGame);
     Button* btn_again = initButton((Vector2){WINDOW_WIDTH - 120, 50}, (Vector2){100, 30}, GRAY, "New Text", WHITE, &newText);
@@ -261,7 +264,7 @@ loop_begin:
         int key;
         while ((key = GetCharPressed()) != 0) {
             if (gameState.text->startTime == 0) {
-                time(&gameState.text->startTime);
+                gameState.text->startTime = GetTime();
             }
             gameState.diagnostics->totalKeystrokes++;
             // move the cursor always forward
@@ -278,8 +281,7 @@ loop_begin:
             }
             if (gameState.currentLine >= gameState.text->lineCount) {
                 gameState.state = MENU;
-                time(&gameState.diagnostics->elepsedTime);
-                gameState.diagnostics->elepsedTime -= gameState.text->startTime;
+                gameState.diagnostics->elepsedTime = GetTime() - gameState.text->startTime;
                 goto loop_begin;
             } else {
                 gameState.text->coloring[gameState.currentLine][gameState.current] = CURRENT;
@@ -298,6 +300,8 @@ loop_begin:
         }
         Vector2 posStart = { GetScreenWidth() / 2 - gameState.longestLine / 2, GetScreenHeight() / 2 - FONT_SIZE / 2 };
 
+        // update time:
+        gameState.diagnostics->elepsedTime = GetTime() - gameState.text->startTime;  
 
         BeginDrawing();
 
@@ -305,21 +309,23 @@ loop_begin:
         // past lines:
         for (int i = 0; i < gameState.currentLine; i++) {
             int lineHeight = FONT_SIZE * (gameState.currentLine - i);
-            DrawText(gameState.text->lines[i], posStart.x, posStart.y - lineHeight, FONT_SIZE - 2, PAST_COLOR);
+            // DrawText(gameState.text->lines[i], posStart.x, posStart.y - lineHeight, FONT_SIZE - 2, PAST_COLOR);
+            DrawStyledText(gameState.text->lines[i], gameState.text->coloring[i], (Vector2){posStart.x, posStart.y - lineHeight}, FONT_SIZE - 2, 2.0);
         }
 
         float currentOffsetX = DrawStyledText(message, coloring, posStart, FONT_SIZE, 2.0);
 
         for (int i = gameState.currentLine + 1; i < gameState.text->lineCount; i++) {
             int lineHeight = FONT_SIZE * (i - gameState.currentLine);
-            DrawText(gameState.text->lines[i], posStart.x, posStart.y + lineHeight, FONT_SIZE - 2, FUTURE_COLOR);
+            DrawStyledText(gameState.text->lines[i], gameState.text->coloring[i], (Vector2){posStart.x, posStart.y + lineHeight}, FONT_SIZE - 2, 2.0);
         }
 
         // draw underscore for the current char:
         DrawLine(posStart.x + currentOffsetX - 2, posStart.y + FONT_SIZE, posStart.x + currentOffsetX + MeasureText("_", FONT_SIZE) + 2, posStart.y + FONT_SIZE, CURRENT_COLOR);
 
         //----------------------------------------------------------------------------------
-        DrawFPS(10, 10);
+        DrawFPS(10, GetScreenHeight() - 50);
+        DrawWPM(gameState.diagnostics);
         EndDrawing();
     }
     freeGameState(&gameState);

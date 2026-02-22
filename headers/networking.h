@@ -18,6 +18,6 @@
 // void bindHost(int sockfd, const char* hostname, const char* port);
 // int makeGetRequest (int sockfd, const char* hostname, char* response, size_t response_size);
 
-void* initCurl (const char* url, const char* port);
+void* initCurl (const char* url);
 int Get (CURL* curl, char* headers);
 void FreeCurl (CURL* curl);

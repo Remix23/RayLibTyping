@@ -21,7 +21,7 @@ typedef enum Colors {
 typedef struct {
     int correct;
     int totalKeystrokes;
-    time_t elepsedTime;
+    double elepsedTime;
 } Diagnostics;
 
 typedef struct Text {
@@ -29,7 +29,7 @@ typedef struct Text {
     Colors** coloring;
     int* lineSizes;
     int lineCount;
-    time_t startTime;
+    double startTime;
 } Text;
 
 typedef struct GameState {

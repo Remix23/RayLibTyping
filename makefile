@@ -5,7 +5,7 @@ C_VERSION := c99
 HEADERS := $(shell find headers -maxdepth 1 -name "*.h")
 SRC := $(shell find src -maxdepth 1 -name "*.c")
 
-DEVFLAGS := -I ./headers -Wall -Wextra -g -std=$(C_VERSION) -fsanitize=address -lcurl
+DEVFLAGS := -I ./headers -Wall -Werror -Wextra -g -std=$(C_VERSION) -fsanitize=address -lcurl
 PRODFLAGS := -I ./headers -O3 -srd=${C_VERSION} -lcurl
 
 $(EXE) : $(SRC) $(HEADERS)

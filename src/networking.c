@@ -9,7 +9,7 @@
 
 static size_t totalSize = 0;
 
-void* initCurl (const char* url, const char* port) 
+void* initCurl (const char* url) 
 {
     CURL *curl = curl_easy_init();
 
