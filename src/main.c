@@ -215,6 +215,11 @@ void DrawWPM (Diagnostics *d) {
     DrawText(TextFormat("WPM: %d", wpm), 10, 10 + FONT_SIZE, FONT_SIZE, ORANGE);
 }
 
+// we 
+void DrawMistakeLetter () {
+    
+}
+
 int main(void)
 {
     GameState gameState = {0};
@@ -254,6 +259,7 @@ loop_begin:
 
             DrawButtons(gameState.buttons, gameState.buttonCount);
             checkButtons(gameState.buttons, gameState.buttonCount, &gameState);
+            DrawWPM(gameState.diagnostics);
             EndDrawing();
             continue;
         }
@@ -270,9 +276,9 @@ loop_begin:
             // move the cursor always forward
             gameState.text->coloring[gameState.currentLine][gameState.current] = MISTAKE;
             if (key == message[gameState.current]) {
-                gameState.diagnostics->correct++;
-                
                 gameState.text->coloring[gameState.currentLine][gameState.current] = PAST;
+
+                gameState.diagnostics->correct++;
             }
             gameState.current++;
             if (gameState.current >= (int)strlen(message)) {
